@@ -1,0 +1,1 @@
+# Fallback staging root for local development when /dev/shm is unavailable

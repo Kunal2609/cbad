@@ -1,0 +1,88 @@
+# ==============================================================================
+# Docker Compose Configuration - Python Code Execution Sandbox
+# ==============================================================================
+# IMPORTANT SECURITY ARCHITECTURE NOTE:
+# The Flask API container is a TRUSTED orchestrator and mounts /var/run/docker.sock
+# to manage ephemeral execution containers. The execution sandbox container itself
+# NEVER receives the Docker socket, host networking, or persistent host mounts.
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Hardened Sandbox Image Build Target (Not a running service)
+  # Built ahead-of-time so the API can spawn containers from it on demand.
+  # ----------------------------------------------------------------------------
+  sandbox-image-builder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.sandbox
+    image: python-sandbox-exec:latest
+    restart: "no"
+    entrypoint: ["echo", "Sandbox execution image built successfully."]
+
+  # ----------------------------------------------------------------------------
+  # 2. Trusted Flask API Host Service
+  # ----------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: python-sandbox-api:latest
+    container_name: python-sandbox-api
+    user: root
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - EXECUTION_TIMEOUT=3
+      - TIMEOUT_GRACE_PERIOD=2
+      - MEMORY_LIMIT=50m
+      - MEMSWAP_LIMIT=50m
+      - CPU_NANO=500000000
+      - PIDS_LIMIT=64
+      - TMPFS_SIZE=16m
+      - MAX_CODE_SIZE=32768
+      - MAX_CODE_LINES=1000
+      - MAX_OUTPUT_SIZE=65536
+      - MAX_CONCURRENT_EXECUTIONS=10
+      - RATE_LIMIT=20/minute
+      - RATE_LIMIT_STORAGE_URI=redis://redis:6379/0
+      - EXECUTION_IMAGE=python-sandbox-exec:latest
+      - STAGING_ROOT=/dev/shm/sandbox
+      - DOCKER_TIMEOUT=10
+      - DEV_MOCK_DOCKER=false
+    volumes:
+      # Docker socket mounted ONLY into trusted API host
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Shared memory tmpfs for fast, RAM-only execution staging
+      - /dev/shm:/dev/shm
+    depends_on:
+      - sandbox-image-builder
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # 3. Redis Service for Multi-Worker Rate Limiting
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: python-sandbox-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"

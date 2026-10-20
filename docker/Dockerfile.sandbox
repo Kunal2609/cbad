@@ -1,0 +1,14 @@
+# Hardened, minimal execution sandbox image
+# Derivative of python:3.10-alpine with dedicated non-root user and zero build tools
+FROM python:3.10-alpine
+
+# Create unprivileged sandbox user and group without home directory
+RUN addgroup -S sandbox && adduser -S -G sandbox -H -D sandbox
+
+# Set non-root execution user and working directory
+USER sandbox:sandbox
+WORKDIR /sandbox
+
+# Prevent Python from writing .pyc bytecode files and force unbuffered standard I/O
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1

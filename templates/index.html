@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Secure, isolated, on-demand Python Code Execution Sandbox.">
+    <title>Python Sandbox — Production Code Execution Engine</title>
+    
+    <!-- Modern Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Application Styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    
+    <!-- Monaco Editor Loader (CDN fallback with local support) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Header -->
+        <header class="app-header">
+            <div class="brand-section">
+                <div class="brand-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1 class="brand-title">Python Sandbox</h1>
+                    <span class="brand-badge">Isolated Container Runtime</span>
+                </div>
+            </div>
+            
+            <div class="header-status-group">
+                <!-- Daemon Health Indicator -->
+                <div class="daemon-indicator" id="daemonStatusBadge" title="Docker Daemon Status">
+                    <span class="pulse-dot" id="daemonPulse"></span>
+                    <span class="daemon-label" id="daemonLabel">Docker: Checking...</span>
+                </div>
+
+                <!-- Execution State Indicator -->
+                <div class="status-indicator status-idle" id="executionStatusBadge">
+                    <span class="status-dot"></span>
+                    <span class="status-text" id="statusText">IDLE</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace Grid -->
+        <main class="workspace-grid">
+            <!-- Left: Editor Pane -->
+            <section class="editor-pane" aria-label="Code Editor Panel">
+                <div class="panel-header">
+                    <div class="panel-title-group">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="16 18 22 12 16 6"></polyline>
+                            <polyline points="8 6 2 12 8 18"></polyline>
+                        </svg>
+                        <span>script.py</span>
+                    </div>
+                    <div class="editor-meta">
+                        <span class="editor-shortcut-hint">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run</span>
+                    </div>
+                </div>
+
+                <!-- Monaco / Fallback Editor Container -->
+                <div class="editor-wrapper" id="editorWrapper">
+                    <div id="monacoContainer" class="monaco-container"></div>
+                    
+                    <!-- Fallback Plain Textarea with Gutter if Monaco fails -->
+                    <div id="fallbackEditor" class="fallback-editor hidden">
+                        <div id="fallbackGutter" class="fallback-gutter">1</div>
+                        <textarea id="fallbackTextarea" class="fallback-textarea" spellcheck="false" placeholder="Write Python code here..."></textarea>
+                    </div>
+                </div>
+
+                <!-- Action Controls Bar -->
+                <div class="action-bar">
+                    <div class="action-group-left">
+                        <button id="runBtn" class="btn btn-primary" title="Execute script in ephemeral container">
+                            <span class="btn-spinner hidden" id="runSpinner"></span>
+                            <svg class="btn-icon" id="runIcon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            <span id="runBtnText">Run Code</span>
+                        </button>
+                        <button id="clearBtn" class="btn btn-secondary" title="Clear console output">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6h18m-2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                            </svg>
+                            <span>Clear</span>
+                        </button>
+                        <button id="resetBtn" class="btn btn-secondary" title="Reset code to default template">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 4v6h6M23 20v-6h-6"></path>
+                                <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"></path>
+                            </svg>
+                            <span>Reset</span>
+                        </button>
+                    </div>
+                    
+                    <div class="action-group-right">
+                        <span class="code-size-counter" id="codeSizeCounter">0 / 32,768 bytes</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right: Execution Output Pane -->
+            <section class="output-pane" aria-label="Execution Output Panel">
+                <div class="panel-header">
+                    <div class="panel-title-group">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="4 17 10 11 4 5"></polyline>
+                            <line x1="12" y1="19" x2="20" y2="19"></line>
+                        </svg>
+                        <span>Console Output</span>
+                    </div>
+                    <button class="btn-copy" id="copyOutputBtn" title="Copy console output">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span>Copy</span>
+                    </button>
+                </div>
+
+                <!-- Terminal Display Content -->
+                <div class="terminal-body" id="terminalBody">
+                    <!-- Placeholder when empty -->
+                    <div class="terminal-empty-state" id="emptyState">
+                        <div class="empty-icon">⚡</div>
+                        <p class="empty-title">Ready to execute</p>
+                        <p class="empty-subtitle">Click "Run Code" or press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to execute your code inside a fresh sandbox container.</p>
+                    </div>
+
+                    <!-- Output Blocks (Dynamically updated) -->
+                    <div id="outputContent" class="output-content hidden">
+                        <!-- Execution Banner / Notice -->
+                        <div id="statusBanner" class="status-banner hidden"></div>
+
+                        <!-- Standard Output -->
+                        <div class="output-section" id="stdoutSection">
+                            <div class="output-section-header">STDOUT</div>
+                            <pre class="terminal-pre terminal-stdout" id="stdoutPre"></pre>
+                        </div>
+
+                        <!-- Standard Error -->
+                        <div class="output-section hidden" id="stderrSection">
+                            <div class="output-section-header header-stderr">STDERR</div>
+                            <pre class="terminal-pre terminal-stderr" id="stderrPre"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer Stats Bar -->
+                <div class="output-stats-bar" id="statsBar">
+                    <div class="stat-item">
+                        <span class="stat-label">Execution Time:</span>
+                        <span class="stat-value" id="statTime">—</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-label">Exit Code:</span>
+                        <span class="stat-value" id="statExitCode">—</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-label">Truncated:</span>
+                        <span class="stat-value" id="statTruncated">—</span>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <span class="stat-label">ID:</span>
+                        <span class="stat-value stat-id" id="statExecId">—</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Application Script -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
