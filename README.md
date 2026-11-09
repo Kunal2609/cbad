@@ -1,5 +1,7 @@
 # Python Code Execution Sandbox
 
+> The repository now also exposes an integration and assessment API at `/api/v1`. The original editor and `/api/execute` sandbox remain available.
+
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.14-blue.svg)]()
 [![Docker](https://img.shields.io/badge/docker-isolated-2496ED.svg)]()
@@ -27,6 +29,73 @@ flowchart TD
     
     I[Startup & Periodic Reapers] -.->|Check sandbox=true label| E
 ```
+
+## Integration and assessment service
+
+The integration layer is implemented as a separate Flask blueprint and calls the same `SandboxExecutor` used by the standalone editor. The `/api/v1` routes never accept Docker options from callers. The existing `/api/execute` contract is unchanged.
+
+### Local bootstrap
+
+1. Configure a strong random `FLASK_SECRET_KEY` in `.env`. Keep `.env` out of source control.
+2. Start the API as before (`python run.py`, with Docker and the sandbox image available).
+3. Create an organization and one-time API key with `flask --app run.py provision-organization`. The credential has the initial integration scopes and its plaintext is shown once. Store it securely.
+4. Set `INTEGRATION_DATABASE` to a writable SQLite file path if you want to relocate the default `instance/integration.sqlite3` database.
+
+Use `Authorization: Bearer <api-key>` for machine-to-machine calls. Candidate session creation returns a short-lived signed candidate token; use it only for that candidate's submission and result calls. API keys are high-entropy, hashed with SHA-256 at rest, scoped, and revocable. The organization ID is always derived from the authenticated credential or signed session.
+
+### Versioned endpoints
+
+| Method | Path | Scope / caller |
+|---|---|---|
+| GET | `/api/v1/health` | Public liveness |
+| POST, GET | `/api/v1/executions`, `/api/v1/executions/{id}` | `executions:write`, `executions:read` |
+| POST, GET | `/api/v1/exams`, `/api/v1/exams/{id}` | `exams:write`, `exams:read` |
+| POST | `/api/v1/exams/{id}/status` | `exams:write` (server-checked lifecycle transition) |
+| POST, GET | `/api/v1/exams/{id}/sessions`, `/api/v1/exams/{id}/sessions/{session_id}` | `sessions:write`, `sessions:read` |
+| POST | `/api/v1/exams/{id}/submissions` | Candidate session token |
+| GET | `/api/v1/submissions/{id}` | Owning candidate token or `submissions:read` |
+| GET | `/api/v1/integrations/me` | Any valid credential |
+| DELETE | `/api/v1/integrations/credentials/{id}` | `credentials:write` |
+| GET | `/api/v1/audit-events` | `audit:read` |
+| POST | `/api/v1/proctoring/events` | `proctoring:write` |
+
+Example direct execution:
+
+```python
+import requests
+r = requests.post("https://sandbox.example.edu/api/v1/executions",
+    headers={"Authorization": "Bearer " + api_key},
+    json={"code": "print('Hello')", "language": "python"}, timeout=10)
+r.raise_for_status()
+print(r.json())
+```
+
+Exam creation accepts title, description, optional ISO-8601 availability timestamps, `allowed_languages: ["python"]`, resource limits bounded by the platform defaults, and public/hidden tests represented as `[{"expected_stdout":"..."}]`. Example:
+
+```javascript
+const response = await fetch("https://sandbox.example.edu/api/v1/exams", {
+  method: "POST",
+  headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ title: "Loops", hidden_tests: [{ expected_stdout: "done\\n" }] })
+});
+```
+
+Move exams through draft → scheduled → active → completed (or cancelled) using the status endpoint. Session creation takes `external_candidate_reference` and is allowed only while an exam is active. The API returns `candidate_token` once; use it as a bearer token to submit `{"code":"...","language":"python"}`. Pass `Idempotency-Key` to safely retry a submission. Errors use `{ "error": { "code", "message", "request_id" } }`.
+
+### Embed demonstration
+
+Visit `/demo/university` for a simulated LMS embedding the retained editor at `/embed/editor`. This page is labeled as simulated and is not connected to real candidates, sessions, or grades. To permit your LMS origin to frame the editor, configure `EMBED_ALLOWED_ORIGINS` as a comma-separated list of exact trusted origins (scheme and host) and serve both systems over HTTPS. The main editor route remains protected from framing.
+
+### Current limits and security boundary
+
+- Integration records currently use Python's built-in SQLite database for a zero-dependency local setup. This implementation does not yet provide PostgreSQL/SQLAlchemy models, Alembic migrations, or production multi-instance database deployment. Use a single API instance for this version; migrate the store before horizontal scaling.
+- The synchronous API uses the existing bounded execution semaphore and per-IP Flask-Limiter. Organization-specific distributed quotas and asynchronous queues are not yet implemented. A scoped API endpoint accepts validated, timestamp-checked, replay-protected proctoring event IDs; provider-specific webhook adapters and signature schemes remain future work.
+- Hidden expected output is held server-side and never appended to the candidate's source. The current minimal scorer compares one run's stdout with configured expected-output cases; it does not provide parameterized input/output test execution. Use an isolated assessment worker design before relying on complex hidden tests.
+- The CLI provisions initial credentials; credential revocation is available through the API. Dedicated organization administration pages and credential rotation UI are not included yet.
+- Execution isolation does not prevent tab switching, external-device use, collaboration, unauthorized AI assistance, or every form of cheating. No webcam, microphone, or screen recording is performed. Browser focus signals and any future provider flags need context and institutional privacy review.
+- The Docker daemon remains a privileged dependency of the trusted orchestrator. User-code containers receive no Docker socket and run with the configured resource/security controls. The 50 MB / three-second defaults need workload validation; consider gVisor, Firecracker, or dedicated worker hosts for higher-risk public use.
+
+The current service keeps exam policies and data organization-scoped, uses server-side expiry checks, avoids returning hidden test definitions, and records core credential, exam, session, execution, and assessment audit events. Review the known limits above before production use.
 
 ---
 

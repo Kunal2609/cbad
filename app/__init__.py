@@ -51,17 +51,27 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 
     # Register blueprints
     from app.routes import api_bp, main_bp
+    from app.integrations import store
+    from app.integrations.routes import bp as integration_bp, provision_organization
+
+    store.initialize()
+    provision_organization(app)
     
     # Apply rate limiter to execute route specifically as well
     limiter.limit(config.RATE_LIMIT)(api_bp)
+    limiter.limit(config.RATE_LIMIT)(integration_bp)
     
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
+    app.register_blueprint(integration_bp)
 
     # Security Headers Middleware
     @app.after_request
     def set_security_headers(response):
         # Strict Content-Security-Policy (allows local self-hosted Monaco and trusted fonts/CDN fallback)
+        frame_policy = "'self'" if request.path == "/embed/editor" else "'none'"
+        if request.path == "/embed/editor":
+            frame_policy += " " + " ".join(origin.strip() for origin in os.getenv("EMBED_ALLOWED_ORIGINS", "").split(",") if origin.strip())
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; "
@@ -69,13 +79,16 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
             "font-src 'self' https://fonts.gstatic.com data:; "
             "connect-src 'self'; "
             "img-src 'self' data:; "
-            "frame-ancestors 'none'; "
+            f"frame-ancestors {frame_policy}; "
             "base-uri 'self'; "
             "form-action 'self';"
         )
         response.headers["Content-Security-Policy"] = csp
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        if request.path == "/embed/editor":
+            response.headers.pop("X-Frame-Options", None)
+        else:
+            response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response

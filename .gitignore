@@ -36,6 +36,8 @@ htmlcov/
 # Sandbox staging execution files (keep .gitkeep)
 sandbox/*
 !sandbox/.gitkeep
+instance/
+.project-deps/
 
 # IDE / OS
 .vscode/

@@ -44,6 +44,17 @@ def index():
     return render_template("index.html")
 
 
+@main_bp.route("/embed/editor")
+def embedded_editor():
+    """Same-origin embed entry point; external origins must be explicitly configured."""
+    return render_template("index.html")
+
+
+@main_bp.route("/demo/university")
+def university_demo():
+    return render_template("university_demo.html")
+
+
 @api_bp.route("/execute", methods=["POST"])
 def execute_code():
     """

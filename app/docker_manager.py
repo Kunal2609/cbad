@@ -6,6 +6,7 @@ Isolates all docker-py interactions for container lifecycle, hardening, and clea
 import concurrent.futures
 import logging
 import os
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 import docker
@@ -33,6 +34,7 @@ class DockerManager:
         if self._client is None:
             try:
                 self._client = docker.from_env(timeout=config.DOCKER_TIMEOUT)
+                logger.info("Docker SDK connected to daemon endpoint %s", self._client.api.base_url)
             except DockerException as e:
                 logger.error("Failed to connect to Docker daemon: %s", str(e))
                 raise
@@ -89,16 +91,17 @@ class DockerManager:
         self,
         execution_id: str,
         host_script_path: str,
+        execution_timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create, run, and watch an ephemeral Docker sandbox container with strict security controls.
         Enforces timeout externally via ThreadPoolExecutor.
         """
         if config.DEV_MOCK_DOCKER:
-            return self._run_mock_sandbox(execution_id, host_script_path)
+            return self._run_mock_sandbox(execution_id, host_script_path, execution_timeout)
 
         client = self.client
-        container_name = f"sandbox-exec-{execution_id}"
+        container_name = f"{config.SANDBOX_CONTAINER_PREFIX}-{execution_id}"
         runtime = self.detect_runtime()
         
         # Define security parameters
@@ -140,7 +143,7 @@ class DockerManager:
             "environment": {},  # Explicitly empty environment
             "init": True,       # Use docker-init (tini) for clean signal forwarding and zombie reaping
             "detach": True,
-            "auto_remove": False,
+            "auto_remove": config.SANDBOX_AUTO_REMOVE,
         }
         
         if runtime:
@@ -154,7 +157,7 @@ class DockerManager:
             container_id = container.id
 
             # External bounded wait watchdog
-            wait_res = self._wait_container_bounded(container_id, container)
+            wait_res = self._wait_container_bounded(container_id, container, execution_timeout)
             return wait_res
 
         except Exception as e:
@@ -168,13 +171,30 @@ class DockerManager:
             raise
         finally:
             if container:
-                self.remove_container(container)
+                retain_for_inspection = (
+                    config.SANDBOX_DEBUG_MODE
+                    and config.SANDBOX_KEEP_CONTAINERS
+                    and not config.SANDBOX_AUTO_REMOVE
+                )
+                if retain_for_inspection and config.SANDBOX_CONTAINER_CLEANUP_DELAY > 0:
+                    delay = config.SANDBOX_CONTAINER_CLEANUP_DELAY
+                    logger.info(
+                        "Retaining sandbox container %s for inspection for %d seconds",
+                        container_name,
+                        delay,
+                        extra={"execution_id": execution_id},
+                    )
+                    cleanup = threading.Timer(delay, self.remove_container, args=(container,))
+                    cleanup.daemon = True
+                    cleanup.start()
+                else:
+                    self.remove_container(container)
 
-    def _wait_container_bounded(self, container_id: str, container: Container) -> Dict[str, Any]:
+    def _wait_container_bounded(self, container_id: str, container: Container, execution_timeout: Optional[int] = None) -> Dict[str, Any]:
         """
         Wait for container completion bounded by EXECUTION_TIMEOUT + TIMEOUT_GRACE_PERIOD.
         """
-        timeout = config.EXECUTION_TIMEOUT
+        timeout = min(config.EXECUTION_TIMEOUT, max(1, int(execution_timeout))) if execution_timeout is not None else config.EXECUTION_TIMEOUT
         grace = config.TIMEOUT_GRACE_PERIOD
         total_wait_timeout = timeout + grace
 
@@ -284,7 +304,7 @@ class DockerManager:
             logger.error("Failed to list sandbox containers: %s", str(e))
             return []
 
-    def _run_mock_sandbox(self, execution_id: str, host_script_path: str) -> Dict[str, Any]:
+    def _run_mock_sandbox(self, execution_id: str, host_script_path: str, execution_timeout: Optional[int] = None) -> Dict[str, Any]:
         """
         Execute code in development emulation mode when Docker Engine is offline.
         Enforces execution timeout and maximum output bounds.
@@ -299,7 +319,7 @@ class DockerManager:
                 [sys.executable, "-B", host_script_path],
                 capture_output=True,
                 text=True,
-                timeout=config.EXECUTION_TIMEOUT,
+                timeout=min(config.EXECUTION_TIMEOUT, max(1, int(execution_timeout))) if execution_timeout is not None else config.EXECUTION_TIMEOUT,
             )
             stdout = proc.stdout
             stderr = proc.stderr
@@ -321,7 +341,7 @@ class DockerManager:
             stderr_str = te.stderr.decode("utf-8", errors="replace") if isinstance(te.stderr, bytes) else str(te.stderr or "")
             return {
                 "status": "timeout",
-                "error": f"Execution timed out after {config.EXECUTION_TIMEOUT} seconds.",
+                "error": f"Execution timed out after {min(config.EXECUTION_TIMEOUT, max(1, int(execution_timeout))) if execution_timeout is not None else config.EXECUTION_TIMEOUT} seconds.",
                 "stdout": stdout_str,
                 "stderr": stderr_str,
                 "truncated": False,

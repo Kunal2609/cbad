@@ -33,12 +33,13 @@ class SandboxExecutor:
     def __init__(self, docker_manager: Optional[DockerManager] = None) -> None:
         self.docker_manager = docker_manager or DockerManager()
 
-    def execute(self, code: str) -> Dict[str, Any]:
+    def execute(self, code: str, execution_timeout: Optional[int] = None) -> Dict[str, Any]:
         """
         Execute user-submitted Python code in an isolated Docker container.
         Ensures staging directory and container cleanup in finally block.
         """
         execution_id = generate_execution_id()
+        effective_timeout = min(config.EXECUTION_TIMEOUT, max(1, int(execution_timeout))) if execution_timeout is not None else config.EXECUTION_TIMEOUT
         staging_dir = Path(config.STAGING_ROOT) / execution_id
         script_path = staging_dir / "script.py"
 
@@ -62,6 +63,7 @@ class SandboxExecutor:
             res = self.docker_manager.create_and_run_sandbox(
                 execution_id=execution_id,
                 host_script_path=str(script_path.resolve()),
+                execution_timeout=execution_timeout,
             )
 
             execution_time_ms = max(0, int((time.perf_counter() - start_time) * 1000))
@@ -71,7 +73,7 @@ class SandboxExecutor:
                     "success": False,
                     "execution_id": execution_id,
                     "status": "timeout",
-                    "error": res.get("error", f"Execution timed out after {config.EXECUTION_TIMEOUT} seconds."),
+                    "error": res.get("error", f"Execution timed out after {effective_timeout} seconds."),
                     "stdout": res.get("stdout", ""),
                     "stderr": res.get("stderr", ""),
                     "execution_time_ms": execution_time_ms,

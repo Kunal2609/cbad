@@ -53,11 +53,21 @@ services:
       - STAGING_ROOT=/dev/shm/sandbox
       - DOCKER_TIMEOUT=10
       - DEV_MOCK_DOCKER=false
+      - SANDBOX_DEBUG_MODE=${SANDBOX_DEBUG_MODE:-true}
+      - SANDBOX_KEEP_CONTAINERS=${SANDBOX_KEEP_CONTAINERS:-true}
+      - SANDBOX_CONTAINER_CLEANUP_DELAY=${SANDBOX_CONTAINER_CLEANUP_DELAY:-30}
+      - SANDBOX_AUTO_REMOVE=${SANDBOX_AUTO_REMOVE:-false}
+      - SANDBOX_CONTAINER_PREFIX=${SANDBOX_CONTAINER_PREFIX:-sandbox-exec}
+      - INTEGRATION_DATABASE=/app/instance/integration.sqlite3
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - EMBED_ALLOWED_ORIGINS=${EMBED_ALLOWED_ORIGINS:-}
     volumes:
       # Docker socket mounted ONLY into trusted API host
       - /var/run/docker.sock:/var/run/docker.sock
       # Shared memory tmpfs for fast, RAM-only execution staging
       - /dev/shm:/dev/shm
+      # Persistent integration records for the local single-instance setup
+      - platform-data:/app/instance
     depends_on:
       - sandbox-image-builder
       - redis
@@ -86,3 +96,6 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+
+volumes:
+  platform-data:

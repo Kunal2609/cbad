@@ -92,6 +92,13 @@ class Config:
     
     # Optional development mock mode for local testing when Docker Desktop is unavailable
     DEV_MOCK_DOCKER: bool = os.getenv("DEV_MOCK_DOCKER", "false").lower() in ("true", "1", "yes")
+
+    # Keep completed execution containers available briefly for Docker Desktop inspection.
+    SANDBOX_DEBUG_MODE: bool = os.getenv("SANDBOX_DEBUG_MODE", "true").lower() in ("true", "1", "yes")
+    SANDBOX_KEEP_CONTAINERS: bool = os.getenv("SANDBOX_KEEP_CONTAINERS", "true").lower() in ("true", "1", "yes")
+    SANDBOX_CONTAINER_CLEANUP_DELAY: int = max(0, int(os.getenv("SANDBOX_CONTAINER_CLEANUP_DELAY", "30")))
+    SANDBOX_AUTO_REMOVE: bool = os.getenv("SANDBOX_AUTO_REMOVE", "false").lower() in ("true", "1", "yes")
+    SANDBOX_CONTAINER_PREFIX: str = os.getenv("SANDBOX_CONTAINER_PREFIX", "sandbox-exec")
     
     # Periodic reaper interval in seconds
     REAPER_INTERVAL_SECONDS: int = int(os.getenv("REAPER_INTERVAL_SECONDS", "10"))

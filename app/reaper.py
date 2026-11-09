@@ -75,6 +75,20 @@ def run_periodic_reaper_cycle(
     if max_age_seconds is None:
         # Buffer of 5 seconds beyond timeout + grace period
         max_age_seconds = config.EXECUTION_TIMEOUT + config.TIMEOUT_GRACE_PERIOD + 5
+        if (
+            config.SANDBOX_DEBUG_MODE
+            and config.SANDBOX_KEEP_CONTAINERS
+            and not config.SANDBOX_AUTO_REMOVE
+        ):
+            # Creation can precede execution completion by up to the execution timeout.
+            # Leave the full configured post-execution inspection window before reaping.
+            max_age_seconds = max(
+                max_age_seconds,
+                config.SANDBOX_CONTAINER_CLEANUP_DELAY
+                + config.EXECUTION_TIMEOUT
+                + config.TIMEOUT_GRACE_PERIOD
+                + config.REAPER_INTERVAL_SECONDS,
+            )
 
     now = datetime.now(timezone.utc)
     reaped_count = 0
